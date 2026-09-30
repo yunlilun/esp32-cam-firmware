@@ -18,4 +18,4 @@ jobs:
             - name: ESP32Servo
             - name: Adafruit NeoPixel
           sketch-paths: |
-            - 'ESP32_S3_Camera_Monitor'
+            - 'ESP32_S3_Camera_Monitor-master'
