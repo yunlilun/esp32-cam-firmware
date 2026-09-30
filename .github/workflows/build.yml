@@ -10,7 +10,7 @@ jobs:
       - name: Compile Arduino Sketch
         uses: arduino/compile-sketches@v1
         with:
-          fqbn: esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=default_16MB,PSRAM=opi
+          fqbn: esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=opi
           platforms: |
             - name: esp32:esp32
               source-url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
@@ -18,4 +18,4 @@ jobs:
             - name: ESP32Servo
             - name: Adafruit NeoPixel
           sketch-paths: |
-            - 'ESP32_S3_Camera_Monitor-master'
+            - 'ESP32_S3_Camera_Monitor'
