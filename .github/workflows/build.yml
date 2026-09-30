@@ -7,9 +7,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build with ESP-IDF
-        uses: espressif/esp-idf-ci-action@v1
+      - name: Compile Arduino Sketch
+        uses: arduino/compile-sketches@v1
         with:
-          esp_idf_version: v5.3.1
-          target: esp32s3
-          path: '.'
+          fqbn: esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=default_16MB,PSRAM=opi
+          platforms: |
+            - name: esp32:esp32
+              source-url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          libraries: |
+            - name: ESP32Servo
+            - name: Adafruit NeoPixel
+          sketch-paths: |
+            - 'ESP32_S3_Camera_Monitor-master'
