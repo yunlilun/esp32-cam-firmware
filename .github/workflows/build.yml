@@ -19,7 +19,6 @@ jobs:
             - name: Adafruit NeoPixel
             - name: WiFiManager
             - name: ArduinoJson
-            - name: ESP32 Async Web Server
             - name: NTPClient
           sketch-paths: |
             - 'ESP32_S3_Camera_Monitor-master'
