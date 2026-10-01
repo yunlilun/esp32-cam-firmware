@@ -1,123 +1,120 @@
-#include <Arduino.h>
-#include <LovyanGFX.hpp>
+/**********************************************************************
+  Filename    : Camera Web Server / 摄像头Web服务器
+  Description : The camera images captured by ESP32S3 are displayed on web page.
+                ESP32S3采集的摄像头图像在网页上显示。
+                支持功能 / Supported Features:
+                1. Web端实时视频流显示 / Real-time video streaming on Web
+                2. Web端控制拍照并保存到SD卡 / Web-controlled photo capture and save to SD card
+                3. SD卡文件系统支持 / SD card file system support
+                4. 系统运行时长显示 / System uptime display
+                5. 视频录制功能（AVI格式，MJPEG编码）/ Video recording (AVI format, MJPEG encoding)
+                6. 视频自动分段录制（2分钟一段）/ Auto-segmented video recording (2 minutes per segment)
+                7. 启动时自动开始录制 / Auto-start recording on boot
+                8. 时间戳文件名（YYYYMMDDHHMM格式，年月日时分）/ Timestamp filename (YYYYMMDDHHMM format)
+                9. SD卡空间自动清理（动态阈值，每次清理释放约2GB空间）/ Auto SD card cleanup (dynamic threshold, frees ~2GB per cleanup)
+                10. NTP时间同步功能 / NTP time synchronization
+                11. HTTP Basic Authentication认证 / HTTP Basic Authentication
+                12. OTA升级功能 / OTA upgrade function
+                13. WS2812B LED状态指示 / WS2812B LED status indication
+  Auther      : Zhu Wenqian
+  Modification: 2026-02-04
+  
+  代码来源 / Code Source:
+  - 基于Freenove ESP32-S3 Camera Example修改 / Modified from Freenove ESP32-S3 Camera Example
+  - 集成Espressif CameraWebServer (Apache License 2.0) / Integrated Espressif CameraWebServer
+  
+  许可证 / License: Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License (CC BY-NC-SA 3.0)
+  详情 / Details: https://creativecommons.org/licenses/by-nc-sa/3.0/
+  
+  重要限制 / Important Restrictions:
+  - 禁止商业用途 / Commercial use prohibited
+  - 必须保留原作者署名 / Must retain original author attribution
+  - 衍生作品必须使用相同许可证 / Derivative works must use same license
+**********************************************************************/
 #include "esp_camera.h"
-#include "FS.h"
-#include "SD_MMC.h"
-#include <driver/i2s.h>
+#include <WiFi.h>
+#include <time.h>
+#include "sd_read_write.h"
+#include "auth.h"
+#include "servo_control.h"
+#include "ota_server.h"
+#include "led_control.h"
 
-// ========== 摄像头引脚（来自官方 kevin-sp-v3-dev/config.h） ==========
-#define PWDN_GPIO_NUM     -1
-#define RESET_GPIO_NUM    -1
-#define XCLK_GPIO_NUM     15
-#define SIOD_GPIO_NUM     4
-#define SIOC_GPIO_NUM     5
-#define Y9_GPIO_NUM       16
-#define Y8_GPIO_NUM       17
-#define Y7_GPIO_NUM       18
-#define Y6_GPIO_NUM       12
-#define Y5_GPIO_NUM       10
-#define Y4_GPIO_NUM       8
-#define Y3_GPIO_NUM       9
-#define Y2_GPIO_NUM       11
-#define VSYNC_GPIO_NUM    6
-#define HREF_GPIO_NUM     7
-#define PCLK_GPIO_NUM     13
+// =================== / ===================
+// Select camera model / 选择摄像头型号 / 选择摄像头型号
+// =================== / ===================
+//#define CAMERA_MODEL_WROVER_KIT // Has PSRAM / 有PSRAM
+//#define CAMERA_MODEL_ESP_EYE // Has PSRAM / 有PSRAM
+#define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM / 有PSRAM
+//#define CAMERA_MODEL_M5STACK_PSRAM // Has PSRAM / 有PSRAM
+//#define CAMERA_MODEL_M5STACK_V2_PSRAM // M5Camera version B Has PSRAM / M5Camera版本B有PSRAM
+//#define CAMERA_MODEL_M5STACK_WIDE // Has PSRAM / 有PSRAM
+//#define CAMERA_MODEL_M5STACK_ESP32CAM // No PSRAM / 无PSRAM
+//#define CAMERA_MODEL_M5STACK_UNITCAM // No PSRAM / 无PSRAM
+//#define CAMERA_MODEL_AI_THINKER // Has PSRAM / 有PSRAM
+//#define CAMERA_MODEL_TTGO_T_JOURNAL // No PSRAM / 无PSRAM
+// ** Espressif Internal Boards / Espressif内部开发板 **
+//#define CAMERA_MODEL_ESP32_CAM_BOARD
+//#define CAMERA_MODEL_ESP32S2_CAM_BOARD
+//#define CAMERA_MODEL_ESP32S3_CAM_LCD
 
-// ========== TFT 引脚（根据扩展板） ==========
-#define TFT_CS   45
-#define TFT_DC   48
-#define TFT_RST  21
-#define TFT_MOSI 20
-#define TFT_SCLK 19
-#define TFT_BL   38
+#include "camera_pins.h"
 
-// ========== 按钮 ==========
-#define BTN_S1   0    // 拍照
-#define BTN_S2   3    // 录像
+// =================== / ===========================
+// Enter your WiFi credentials / 输入WiFi凭证 / 输入WiFi凭证
+// =================== / ===========================
+// 不再使用固定的WiFi凭证，改为AP模式
+// const char* ssid     = "zhuline";
+// const char* password = "zhu8437547";
 
-// ========== SD 卡引脚（1-bit 模式） ==========
-#define SD_CLK   39
-#define SD_CMD   38
-#define SD_D0    40
+// 运行时长统计 / Uptime counter / Uptime counter
+unsigned long startTime = 0;
 
-// ========== 麦克风 I2S 引脚（必须核实！） ==========
-#define I2S_SCK   32
-#define I2S_WS    33
-#define I2S_SD    25
-#define SAMPLE_RATE 16000
+void startCameraServer();
 
-// ========== 屏幕驱动 ==========
-class LGFX : public lgfx::LGFX_Device {
-  lgfx::Panel_ST7789 _panel_instance;
-  lgfx::Bus_SPI      _bus_instance;
-public:
-  LGFX(void) {
-    {
-      auto cfg = _bus_instance.config();
-      cfg.spi_host    = SPI2_HOST;
-      cfg.spi_mode    = 0;
-      cfg.freq_write  = 40000000;
-      cfg.freq_read   = 16000000;
-      cfg.spi_3wire   = false;
-      cfg.use_lock    = true;
-      cfg.dma_channel = 1;
-      cfg.pin_sclk    = TFT_SCLK;
-      cfg.pin_mosi    = TFT_MOSI;
-      cfg.pin_miso    = -1;
-      cfg.pin_dc      = TFT_DC;
-      _bus_instance.config(cfg);
-      _panel_instance.setBus(&_bus_instance);
-    }
-    {
-      auto cfg = _panel_instance.config();
-      cfg.pin_cs           = TFT_CS;
-      cfg.pin_rst          = TFT_RST;
-      cfg.pin_busy         = -1;
-      cfg.panel_width      = 240;
-      cfg.panel_height     = 320;
-      cfg.offset_x         = 0;
-      cfg.offset_y         = 0;
-      cfg.offset_rotation  = 0;
-      cfg.dummy_read_pixel = 8;
-      cfg.dummy_read_bits  = 1;
-      cfg.readable         = true;
-      cfg.invert           = true;
-      cfg.rgb_order        = false;
-      cfg.dlen_16bit       = false;
-      cfg.bus_shared       = false;
-      _panel_instance.config(cfg);
-    }
-    setPanel(&_panel_instance);
-  }
-};
+// 视频录制任务 / Video recording task / Video recording task / Video recording task
+void videoRecordTask(void *pvParameters);
 
-LGFX tft;
-
-// ========== 模式状态机 ==========
-enum Mode { MODE_DISPLAY, MODE_PHOTO, MODE_RECORD };
-Mode currentMode = MODE_DISPLAY;
-
-bool recording = false;
-File videoFile;
-File audioFile;
-int photoCounter = 0;
-int videoCounter = 0;
-
-// ========== 背光控制 ==========
-void backlight(bool on) {
-  if (on) {
-    pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, HIGH);
-  } else {
-    pinMode(TFT_BL, INPUT); // 高阻态，彻底释放 GPIO 38
-  }
+// 获取运行时长（秒）/ Get uptime in seconds/ Get uptime in seconds
+unsigned long getUptimeSeconds() {
+  return (millis() - startTime) / 1000;
 }
 
-// ========== 摄像头初始化 ==========
-bool initCamera() {
+void setup() {
+  Serial.begin(115200);
+  Serial.setDebugOutput(true);
+  Serial.println();
+
+  // 初始化LED / Initialize LED / Initialize LED
+  Serial.println("Initializing LED... / 初始化LED...");
+  led_init();
+  
+  // 设置LED为初始化慢闪状态 / Set LED to initialization slow flash status
+  led_set_status(LED_INIT_SLOW_FLASH);
+
+  // 初始化认证模块 / Initialize authentication module / Initialize authentication module
+  if(!auth_init()) {
+    Serial.println("Failed to initialize auth module / 认证模块初始化失败");
+  } else {
+    Serial.println("Auth module initialized / 认证模块已初始化");
+  }
+
+  // ========== 已注释掉舵机初始化，避免卡死 ==========
+  // 初始化云台舵机 / Initialize pan-tilt servos / Initialize pan-tilt servos
+  // Serial.println("Initializing pan-tilt servos... / 初始化云台舵机...");
+  // if(servo_init()) {
+  //   Serial.println("Pan-tilt servos initialized / 云台舵机初始化完成");
+  // } else {
+  //   Serial.println("Failed to initialize pan-tilt servos / 云台舵机初始化失败");
+  // }
+  // =================================================
+
+  // 记录启动时间 / Record start time / Record start time
+  startTime = millis();
+
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
-  config.ledc_timer   = LEDC_TIMER_0;
+  config.ledc_timer = LEDC_TIMER_0;
   config.pin_d0 = Y2_GPIO_NUM;
   config.pin_d1 = Y3_GPIO_NUM;
   config.pin_d2 = Y4_GPIO_NUM;
@@ -126,238 +123,178 @@ bool initCamera() {
   config.pin_d5 = Y7_GPIO_NUM;
   config.pin_d6 = Y8_GPIO_NUM;
   config.pin_d7 = Y9_GPIO_NUM;
-  config.pin_xclk  = XCLK_GPIO_NUM;
-  config.pin_pclk  = PCLK_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
   config.pin_vsync = VSYNC_GPIO_NUM;
-  config.pin_href  = HREF_GPIO_NUM;
-  config.pin_sccb_sda = SIOD_GPIO_NUM;
-  config.pin_sccb_scl = SIOC_GPIO_NUM;
-  config.pin_pwdn  = PWDN_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size   = FRAMESIZE_QVGA;
+  config.frame_size = FRAMESIZE_XGA;
+  config.pixel_format = PIXFORMAT_JPEG; // for streaming / 用于流媒体 / 用于流媒体
+  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  config.fb_location = CAMERA_FB_IN_PSRAM;
   config.jpeg_quality = 12;
-  config.fb_count     = 2;
-  config.fb_location  = CAMERA_FB_IN_PSRAM;
-  config.grab_mode    = CAMERA_GRAB_LATEST;
-
-  esp_err_t err = esp_camera_init(&config);
-  return (err == ESP_OK);
-}
-
-// ========== SD 卡按需初始化 ==========
-bool sdMounted = false;
-
-bool mountSD() {
-  if (sdMounted) return true;
-  SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0);
-  if (!SD_MMC.begin("/sdcard", true, true, SDMMC_FREQ_DEFAULT, 5)) {
-    Serial.println("SD mount failed");
-    return false;
-  }
-  sdMounted = true;
-  Serial.printf("SD mounted, size=%lluMB\n", SD_MMC.cardSize() / (1024 * 1024));
-  return true;
-}
-
-void unmountSD() {
-  if (!sdMounted) return;
-  SD_MMC.end();
-  sdMounted = false;
-  Serial.println("SD unmounted");
-}
-
-// ========== 音频（I2S 麦克风） ==========
-bool initAudio() {
-  i2s_config_t i2s_cfg = {
-    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-    .sample_rate = SAMPLE_RATE,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 4,
-    .dma_buf_len = 256,
-    .use_apll = false,
-  };
-  if (i2s_driver_install(I2S_NUM_0, &i2s_cfg, 0, NULL) != ESP_OK) return false;
-  i2s_pin_config_t pin_cfg = {
-    .bck_io_num   = I2S_SCK,
-    .ws_io_num    = I2S_WS,
-    .data_out_num = I2S_PIN_NO_CHANGE,
-    .data_in_num  = I2S_SD,
-  };
-  return (i2s_set_pin(I2S_NUM_0, &pin_cfg) == ESP_OK);
-}
-
-void deinitAudio() {
-  i2s_driver_uninstall(I2S_NUM_0);
-}
-
-// ========== 拍一张照片 ==========
-bool capturePhoto() {
-  camera_fb_t *fb = esp_camera_fb_get();
-  if (!fb) return false;
-
-  char path[64];
-  snprintf(path, sizeof(path), "/PHOTO_%03d.jpg", ++photoCounter);
-  File f = SD_MMC.open(path, FILE_WRITE);
-  bool ok = false;
-  if (f) {
-    f.write(fb->buf, fb->len);
-    f.close();
-    ok = true;
-    Serial.printf("Saved %s (%u bytes)\n", path, fb->len);
-  }
-  esp_camera_fb_return(fb);
-  return ok;
-}
-
-// ========== 模式切换 ==========
-void enterDisplayMode() {
-  currentMode = MODE_DISPLAY;
-  backlight(true);
-  Serial.println("[MODE] DISPLAY");
-}
-
-void enterPhotoMode() {
-  currentMode = MODE_PHOTO;
-  backlight(false);
-  delay(50);
-  if (mountSD()) {
-    capturePhoto();
-    unmountSD();
+  config.fb_count = 1;
+  
+  // if PSRAM IC present, init with SVGA resolution and higher JPEG quality / 如果有PSRAM，使用SVGA分辨率和更高的JPEG质量
+  // for larger pre-allocated frame buffer. / 以获得更大的预分配帧缓冲区。
+  // 如果有PSRAM，使用SVGA分辨率和更高的JPEG质量
+  // 以获得更大的预分配帧缓冲区。
+  if(psramFound()){
+    config.jpeg_quality = 10;
+    config.fb_count = 2;
+    config.grab_mode = CAMERA_GRAB_LATEST;
   } else {
-    Serial.println("SD not available, photo skipped");
-  }
-  delay(100);
-  enterDisplayMode();
-}
-
-void enterRecordMode() {
-  currentMode = MODE_RECORD;
-  backlight(false);
-  delay(50);
-
-  if (!mountSD()) {
-    Serial.println("SD mount failed, cannot record");
-    enterDisplayMode();
-    return;
-  }
-  if (!initAudio()) {
-    Serial.println("Audio init failed, video only");
+    // Limit the frame size when PSRAM is not available / 没有PSRAM时限制帧大小
+    // 没有PSRAM时限制帧大小
+    config.frame_size = FRAMESIZE_QVGA;
+    config.fb_location = CAMERA_FB_IN_DRAM;
   }
 
-  char path[64];
-  snprintf(path, sizeof(path), "/VIDEO_%03d.mjpeg", ++videoCounter);
-  videoFile = SD_MMC.open(path, FILE_WRITE);
-  if (!videoFile) {
-    Serial.println("Failed to open video file");
-    deinitAudio();
-    unmountSD();
-    enterDisplayMode();
+  // camera init / 摄像头初始化 / 摄像头初始化
+  esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK) {
+    Serial.printf("Camera init failed with error 0x%x / 摄像头初始化失败，错误代码 0x%x", err);
+    // 设置LED为摄像头错误状态 / Set LED to camera error status
+    led_set_status(LED_CAMERA_ERROR);
     return;
   }
 
-  // 创建 WAV 文件（音频）
-  char wavPath[64];
-  snprintf(wavPath, sizeof(wavPath), "/AUDIO_%03d.wav", videoCounter);
-  audioFile = SD_MMC.open(wavPath, FILE_WRITE);
-  if (audioFile) {
-    // 先写 44 字节占位头，后面补
-    uint8_t header[44] = {0};
-    audioFile.write(header, 44);
+  // 摄像头初始化成功，设置LED为就绪状态 / Camera init successful, set LED to ready status
+  led_set_status(LED_CAMERA_READY);
+
+  sensor_t * s = esp_camera_sensor_get();
+  // initial sensors are flipped vertically and colors are a bit saturated / 初始传感器垂直翻转，颜色有点饱和
+  // 初始传感器垂直翻转，颜色有点饱和
+  s->set_vflip(s, 1); // flip it back / 翻转回来 / 翻转回来
+  s->set_brightness(s, 1); // up the brightness just a bit / 稍微提高亮度 / 稍微提高亮度
+  s->set_saturation(s, 0); // lower the saturation / 降低饱和度 / 降低饱和度
+  
+  // ========== 改为 AP 模式 ==========
+  // 启动AP模式，自己创建热点，SSID为"ESP32-CAM"，密码为"12345678"
+  WiFi.softAP("ESP32-CAM", "12345678");
+  Serial.println("AP Mode started / AP模式已启动");
+  Serial.print("AP IP address: ");
+  Serial.println(WiFi.softAPIP());
+  // ==================================
+
+  // 注意：NTP时间同步需要互联网，在AP模式下无法使用，因此注释掉。
+  // 配置NTP时间同步 / Configure NTP time synchronization / Configure NTP time synchronization
+  /*
+  Serial.println("Configuring NTP time... / 配置NTP时间...");
+  configTime(8 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+  Serial.print("Waiting for NTP time sync: / 等待NTP时间同步: ");
+  time_t now = time(nullptr);
+  while (now < 8 * 3600 * 2) {
+    delay(500);
+    Serial.print(".");
+    now = time(nullptr);
+  }
+  Serial.println("");
+  struct tm timeinfo;
+  localtime_r(&now, &timeinfo);
+  Serial.printf("Current time: %04d-%02d-%02d %02d:%02d:%02d\n",
+                timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+  */
+
+  // 初始化SD卡 / Initialize SD card / Initialize SD card
+  Serial.println("Initializing SD card... / 初始化SD卡...");
+  if(!sdmmcInit()){
+    Serial.println("SD card initialization failed / SD卡初始化失败");
+    // 设置LED为SD卡错误状态 / Set LED to SD card error status
+    led_set_status(LED_SD_ERROR);
+  } else {
+    Serial.println("SD card initialized successfully / SD卡初始化成功");
+  }
+  
+  // 初始化照片保存目录 / Initialize photo save directory / Initialize photo save directory
+  initPhotoDir();
+
+  // 清理无效视频文件（大小为0KB的视频）/ Clean up invalid video files (0KB video files) / Clean up invalid video files (0KB video files)
+  Serial.println("Cleaning up invalid video files... / 清理无效视频文件...");
+  int cleanedFiles = cleanInvalidVideoFiles();
+  if(cleanedFiles > 0){
+    Serial.printf("Cleaned up %d invalid video file(s)\n", cleanedFiles);
+    Serial.printf("清理了 %d 个无效视频文件\n", cleanedFiles);
+  } else if(cleanedFiles == 0){
+    Serial.println("No invalid video files found / 未发现无效视频文件");
+  } else {
+    Serial.println("Failed to clean up invalid video files / 清理无效视频文件失败");
   }
 
-  recording = true;
-  Serial.printf("[MODE] RECORD -> %s / %s\n", path, wavPath);
-}
-
-void exitRecordMode() {
-  recording = false;
-  if (videoFile) videoFile.close();
-  if (audioFile) {
-    // 补写 WAV 头
-    audioFile.seek(0);
-    // ... 此处省略 WAV 头填充，可简化为直接使用原始 PCM
-    audioFile.close();
+  // 启动视频录制（启动时自动开始录制）/ Start video recording (auto-start on boot)/ Start video recording (auto-start on boot)
+  Serial.println("Starting video recording... / 启动视频录制...");
+  if(startVideoRecording(20, 1024, 768)){
+    Serial.println("Video recording started successfully / 视频录制启动成功");
+    
+    // 创建视频录制任务 / Create video recording task / Create video recording task
+    int *fpsParam = (int*)malloc(sizeof(int));
+    *fpsParam = 20;
+    xTaskCreate(videoRecordTask, "video_record", 4096, fpsParam, 5, NULL);
+  } else {
+    Serial.println("Failed to start video recording / 视频录制启动失败");
   }
-  deinitAudio();
-  unmountSD();
-  Serial.println("[MODE] RECORD stopped");
-  enterDisplayMode();
+
+  startCameraServer();
+
+  Serial.print("Camera Ready! Use 'http://");
+  Serial.print(WiFi.softAPIP());
+  Serial.println("' to connect / 摄像头就绪！使用 'http://");
+  Serial.print(WiFi.softAPIP());
+  Serial.println("' 连接");
 }
 
-// ========== setup ==========
-void setup() {
-  Serial.begin(115200);
-  pinMode(BTN_S1, INPUT_PULLUP);
-  pinMode(BTN_S2, INPUT_PULLUP);
-
-  backlight(true);
-  tft.init();
-  tft.setRotation(1);
-  tft.setSwapBytes(true);
-  tft.fillScreen(TFT_BLACK);
-
-  initCamera();
-  enterDisplayMode();
+// 视频录制任务 / Video recording task / Video recording task / Video recording task
+void videoRecordTask(void *pvParameters) {
+  camera_fb_t *fb = NULL;
+  int fps = *((int*)pvParameters);
+  int delayMs = 1000 / fps;
+  
+  Serial.printf("Video recording task started, FPS: %d / 视频录制任务已启动，帧率: %d\n", fps);
+  
+  while(isRecordingVideo()) {
+    // 获取摄像头帧 / Get camera frame / Get camera frame
+    fb = esp_camera_fb_get();
+    if(!fb) {
+      Serial.println("Camera capture failed during recording / 录制过程中摄像头捕获失败");
+      vTaskDelay(pdMS_TO_TICKS(delayMs));
+      continue;
+    }
+    
+    // 写入视频帧 / Write video frame / Write video frame
+    if(!writeVideoFrame(fb->buf, fb->len)) {
+      Serial.println("Failed to write video frame / 写入视频帧失败");
+    }
+    
+    // 释放帧缓冲区 / Release frame buffer / Release frame buffer
+    esp_camera_fb_return(fb);
+    
+    // 延迟以控制帧率 / Delay to control frame rate / Delay to control frame rate
+    vTaskDelay(pdMS_TO_TICKS(delayMs));
+  }
+  
+  Serial.println("Video recording task stopped / 视频录制任务已停止");
+  free(pvParameters);
+  vTaskDelete(NULL);
 }
 
-// ========== loop ==========
 void loop() {
-  // ---- S1: 拍照 ----
-  if (digitalRead(BTN_S1) == LOW) {
-    delay(30);
-    if (digitalRead(BTN_S1) == LOW && currentMode != MODE_RECORD) {
-      enterPhotoMode();
-      while (digitalRead(BTN_S1) == LOW) delay(10);
+  // Do nothing. Everything is done in another task by the web server / 什么都不做。所有工作都由Web服务器在另一个任务中完成
+  // 什么都不做。所有工作都由Web服务器在另一个任务中完成
+  delay(10000);
+  
+  // 每小时清理一次过期会话（3600秒 = 1小时）/ Clean up expired sessions every hour (3600s = 1 hour)/ Clean up expired sessions every hour (3600s = 1 hour)
+  static unsigned long last_cleanup = 0;
+  unsigned long current_time = millis();
+  if(current_time - last_cleanup >= 3600000) { // 3600000毫秒 = 1小时 / 3600000ms = 1 hour / 3600000ms = 1 hour
+    uint32_t cleaned = auth_cleanup_expired_sessions();
+    if(cleaned > 0) {
+      Serial.printf("Cleaned up %u expired sessions / 清理了 %u 个过期会话\n", cleaned);
     }
-  }
-
-  // ---- S2: 开始/停止录像 ----
-  if (digitalRead(BTN_S2) == LOW) {
-    delay(30);
-    if (digitalRead(BTN_S2) == LOW) {
-      if (currentMode == MODE_RECORD) {
-        exitRecordMode();
-      } else {
-        enterRecordMode();
-      }
-      while (digitalRead(BTN_S2) == LOW) delay(10);
-    }
-  }
-
-  // ---- 按模式执行 ----
-  switch (currentMode) {
-    case MODE_DISPLAY: {
-      camera_fb_t *fb = esp_camera_fb_get();
-      if (fb) {
-        tft.drawJpg(fb->buf, fb->len, 0, 0);
-        esp_camera_fb_return(fb);
-      }
-      delay(30);
-      break;
-    }
-    case MODE_RECORD: {
-      camera_fb_t *fb = esp_camera_fb_get();
-      if (fb) {
-        if (videoFile) videoFile.write(fb->buf, fb->len);
-        esp_camera_fb_return(fb);
-      }
-      if (audioFile) {
-        size_t bytes_read = 0;
-        uint8_t audio_buf[512];
-        i2s_read(I2S_NUM_0, audio_buf, sizeof(audio_buf), &bytes_read, 0);
-        if (bytes_read > 0) audioFile.write(audio_buf, bytes_read);
-      }
-      delay(40);
-      break;
-    }
-    case MODE_PHOTO:
-    default:
-      delay(10);
-      break;
+    last_cleanup = current_time;
   }
 }
