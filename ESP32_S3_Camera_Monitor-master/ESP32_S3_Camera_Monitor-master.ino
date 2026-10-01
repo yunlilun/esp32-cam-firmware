@@ -87,7 +87,7 @@ void setup() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.frame_size = FRAMESIZE_QVGA;   // 降级到QVGA，避免卡顿
+  config.frame_size = FRAMESIZE_VGA;   // 视频流用 VGA，拍照时切 UXGA
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = CAMERA_FB_IN_PSRAM;
@@ -125,24 +125,10 @@ void setup() {
   Serial.print("SSID: ESP32-CAM-Setup\nPassword: 12345678\nIP: ");
   Serial.println(WiFi.softAPIP());
   Serial.println("=================================================");
-  // ==================================
 
   // ========== NTP 时间同步（AP模式无互联网，已注释） ==========
-  // Serial.println("Configuring NTP time...");
   // configTime(8 * 3600, 0, "pool.ntp.org", "time.nist.gov");
-  // Serial.print("Waiting for NTP time sync: ");
-  // time_t now = time(nullptr);
-  // while (now < 8 * 3600 * 2) {
-  //   delay(500);
-  //   Serial.print(".");
-  //   now = time(nullptr);
-  // }
-  // Serial.println("");
-  // struct tm timeinfo;
-  // localtime_r(&now, &timeinfo);
-  // Serial.printf("Current time: %04d-%02d-%02d %02d:%02d:%02d\n",
-  //               timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
-  //               timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+  // 其他 NTP 相关代码全部注释
   // ==========================================================
 
   // 初始化SD卡
