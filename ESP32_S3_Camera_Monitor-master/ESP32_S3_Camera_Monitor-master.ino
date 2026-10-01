@@ -98,13 +98,15 @@ void setup() {
     Serial.println("Auth module initialized / 认证模块已初始化");
   }
 
+  // ========== 已注释掉舵机初始化，避免卡死 ==========
   // 初始化云台舵机 / Initialize pan-tilt servos / Initialize pan-tilt servos
-  Serial.println("Initializing pan-tilt servos... / 初始化云台舵机...");
-  if(servo_init()) {
-    Serial.println("Pan-tilt servos initialized / 云台舵机初始化完成");
-  } else {
-    Serial.println("Failed to initialize pan-tilt servos / 云台舵机初始化失败");
-  }
+  // Serial.println("Initializing pan-tilt servos... / 初始化云台舵机...");
+  // if(servo_init()) {
+  //   Serial.println("Pan-tilt servos initialized / 云台舵机初始化完成");
+  // } else {
+  //   Serial.println("Failed to initialize pan-tilt servos / 云台舵机初始化失败");
+  // }
+  // =================================================
 
   // 记录启动时间 / Record start time / Record start time
   startTime = millis();
