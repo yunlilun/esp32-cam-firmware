@@ -213,10 +213,21 @@ static esp_err_t capture_handler(httpd_req_t *req)
     size_t fb_len = 0;
 #endif
 
+    // 切到 UXGA 200万像素拍照
+    sensor_t *s = esp_camera_sensor_get();
+    framesize_t saved_framesize = s->status.framesize;
+    s->set_framesize(s, FRAMESIZE_UXGA);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    for (int i = 0; i < 3; i++) {
+        camera_fb_t *temp_fb = esp_camera_fb_get();
+        if (temp_fb) esp_camera_fb_return(temp_fb);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
 #ifdef CONFIG_LED_ILLUMINATOR_ENABLED
     enable_led(true);
-    vTaskDelay(150 / portTICK_PERIOD_MS); // The LED needs to be turned on ~150ms before the call to esp_camera_fb_get()
-    fb = esp_camera_fb_get();             // or it won't be visible in the frame. A better way to do this is needed.
+    vTaskDelay(150 / portTICK_PERIOD_MS);
+    fb = esp_camera_fb_get();
     enable_led(false);
 #else
     fb = esp_camera_fb_get();
@@ -225,14 +236,13 @@ static esp_err_t capture_handler(httpd_req_t *req)
     if (!fb)
     {
         ESP_LOGE(TAG, "Camera capture failed");
+        s->set_framesize(s, saved_framesize);
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
-    // 触发拍照LED闪烁 / Trigger photo LED flash
     led_set_status(LED_PHOTO_FLASH);
 
-    // 保存照片到SD卡
     bool saveSuccess = savePhotoToSD(fb->buf, fb->len);
     if(saveSuccess){
         ESP_LOGI(TAG, "Photo saved to SD card successfully");
@@ -265,12 +275,17 @@ static esp_err_t capture_handler(httpd_req_t *req)
 #endif
     }
     esp_camera_fb_return(fb);
+
+    s->set_framesize(s, saved_framesize);
+    vTaskDelay(pdMS_TO_TICKS(300));
+
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
     int64_t fr_end = esp_timer_get_time();
 #endif
     ESP_LOGI(TAG, "JPG: %uB %ums", (uint32_t)(fb_len), (uint32_t)((fr_end - fr_start) / 1000));
     return res;
 }
+
 
 static esp_err_t stream_handler(httpd_req_t *req)
 {
