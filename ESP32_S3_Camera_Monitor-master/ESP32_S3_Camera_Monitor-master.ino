@@ -63,8 +63,9 @@
 // =================== / ===========================
 // Enter your WiFi credentials / 输入WiFi凭证 / 输入WiFi凭证
 // =================== / ===========================
-const char* ssid     = "zhuline";
-const char* password = "zhu8437547";
+// 不再使用固定的WiFi凭证，改为AP模式
+// const char* ssid     = "zhuline";
+// const char* password = "zhu8437547";
 
 // 运行时长统计 / Uptime counter / Uptime counter
 unsigned long startTime = 0;
@@ -172,17 +173,17 @@ void setup() {
   s->set_brightness(s, 1); // up the brightness just a bit / 稍微提高亮度 / 稍微提高亮度
   s->set_saturation(s, 0); // lower the saturation / 降低饱和度 / 降低饱和度
   
-  WiFi.begin(ssid, password);
-  WiFi.setSleep(false);
+  // ========== 改为 AP 模式 ==========
+  // 启动AP模式，自己创建热点，SSID为"ESP32-CAM"，密码为"12345678"
+  WiFi.softAP("ESP32-CAM", "12345678");
+  Serial.println("AP Mode started / AP模式已启动");
+  Serial.print("AP IP address: ");
+  Serial.println(WiFi.softAPIP());
+  // ==================================
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("");
-  Serial.println("WiFi connected / WiFi已连接");
-
+  // 注意：NTP时间同步需要互联网，在AP模式下无法使用，因此注释掉。
   // 配置NTP时间同步 / Configure NTP time synchronization / Configure NTP time synchronization
+  /*
   Serial.println("Configuring NTP time... / 配置NTP时间...");
   configTime(8 * 3600, 0, "pool.ntp.org", "time.nist.gov");
   Serial.print("Waiting for NTP time sync: / 等待NTP时间同步: ");
@@ -198,6 +199,7 @@ void setup() {
   Serial.printf("Current time: %04d-%02d-%02d %02d:%02d:%02d\n",
                 timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
                 timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+  */
 
   // 初始化SD卡 / Initialize SD card / Initialize SD card
   Serial.println("Initializing SD card... / 初始化SD卡...");
@@ -240,9 +242,9 @@ void setup() {
   startCameraServer();
 
   Serial.print("Camera Ready! Use 'http://");
-  Serial.print(WiFi.localIP());
+  Serial.print(WiFi.softAPIP());
   Serial.println("' to connect / 摄像头就绪！使用 'http://");
-  Serial.print(WiFi.localIP());
+  Serial.print(WiFi.softAPIP());
   Serial.println("' 连接");
 }
 
