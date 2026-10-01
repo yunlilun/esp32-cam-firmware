@@ -21,12 +21,18 @@ jobs:
           sketch-paths: |
             - 'ESP32_S3_Camera_Monitor-master'
 
+      - name: Find and copy bin files
+        run: |
+          mkdir -p ${{ github.workspace }}/output
+          find ${{ github.workspace }} -name "*.bin" -type f -exec cp {} ${{ github.workspace }}/output/ \; 2>/dev/null || true
+          find ${{ github.workspace }} -name "*.elf" -type f -exec cp {} ${{ github.workspace }}/output/ \; 2>/dev/null || true
+          find /home/runner -name "*.bin" -type f -exec cp {} ${{ github.workspace }}/output/ \; 2>/dev/null || true
+          echo "=== 找到的文件 ==="
+          ls -la ${{ github.workspace }}/output/
+
       - name: Upload firmware
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: firmware
-          path: |
-            **/*.bin
-            **/*.elf
-            **/*.map
-            ESP32_S3_Camera_Monitor-master/build/*.bin
+          path: ${{ github.workspace }}/output/
