@@ -15,10 +15,8 @@ jobs:
             - name: esp32:esp32
               source-url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
           libraries: |
+            - name: Freenove WS2812 Lib for ESP32
             - name: ESP32Servo
-            - name: Adafruit NeoPixel
             - name: WiFiManager
-            - name: ArduinoJson
-            - name: NTPClient
           sketch-paths: |
             - 'ESP32_S3_Camera_Monitor-master'
